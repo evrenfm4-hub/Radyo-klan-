@@ -23,7 +23,7 @@
         }
         #chatBox {
             width: 100%;
-            height: 180px;
+            height: 220px;
             background-color: #0f172a;
             border: 1px solid #334155;
             border-radius: 8px;
@@ -172,7 +172,6 @@
             chatBox.appendChild(siraDiv);
             chatBox.scrollTop = chatBox.scrollHeight;
 
-            // Test için süreyi kısa tutabilirsin (örneğin 5000 = 5 saniye). Gerçek için 7 * 60 * 1000 yapın.
             setTimeout(() => {
                 const falIcerigi = `Fincanınızda çok net bir şekilde büyük bir yol ve yolun sonunda ellerini açmış bekleyen bir insan silüeti çıkmış. Uzun zamandır beklediğiniz haber gelecek ve hanenize huzur dolacak. Tabakta ise büyük bir balık ve altın sembolü var; maddi anlamda eliniz rahatlayacak.`;
                 
@@ -185,16 +184,15 @@
                 chatBox.appendChild(sonucDiv);
                 chatBox.scrollTop = chatBox.scrollHeight;
 
-                // Falı hafızaya kaydet
                 saveFalToStorage(falIcerigi);
-            }, 5000); // Test için 5 saniye ayarlandı, dilerseniz artırabilirsiniz.
+            }, 5000);
         });
 
         // Eski falları listeleme butonu
         oldFalsBtn.addEventListener('click', () => {
             let fals = JSON.parse(localStorage.getItem('eski_fallar') || '[]');
             
-            chatBox.innerHTML = ''; // Ekranı temizle veya altına ekle
+            chatBox.innerHTML = ''; // Önceki mesajları temizle
             
             if (fals.length === 0) {
                 chatBox.innerHTML = `<div class="fal-message">📜 Henüz geçmiş fal kaydınız bulunmuyor.</div>`;
