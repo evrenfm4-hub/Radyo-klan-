@@ -13,6 +13,7 @@ let waitingPlayer = null;
 io.on('connection', (socket) => {
     console.log('Bir kullanıcı bağlandı:', socket.id);
 
+    // Eşleşme mantığı
     socket.on('find-match', () => {
         if (waitingPlayer && waitingPlayer.id !== socket.id) {
             const room = 'room_' + socket.id;
@@ -27,7 +28,7 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Herkesin görebilmesi için mesajı genel lobiye yay (io.emit)
+    // 80 milyon kişinin genel lobi sohbeti (Gönderilen mesaj herkese gider)
     socket.on('chat-message', (data) => {
         io.emit('chat-message', data);
     });
