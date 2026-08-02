@@ -13,7 +13,6 @@ let waitingPlayer = null;
 io.on('connection', (socket) => {
     console.log('Bir kullanıcı bağlandı:', socket.id);
 
-    // Eşleşme veya oda bulma isteği
     socket.on('find-match', () => {
         if (waitingPlayer && waitingPlayer.id !== socket.id) {
             const room = 'room_' + socket.id;
@@ -28,15 +27,9 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Oda içi mesajlaşma sistemi
+    // Herkesin görebilmesi için mesajı genel lobiye yay (io.emit)
     socket.on('chat-message', (data) => {
-        // data içinde { roomId, message, sender } gibi bilgiler gelebilir
-        if (data && data.roomId) {
-            io.to(data.roomId).emit('chat-message', data);
-        } else {
-            // Eğer oda belirtilmediyse genel yayınla veya odalara dağıt
-            socket.broadcast.emit('chat-message', data);
-        }
+        io.emit('chat-message', data);
     });
 
     socket.on('disconnect', () => {
