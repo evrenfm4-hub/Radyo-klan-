@@ -1,5 +1,5 @@
 {
-  "name": "radyo-klan-sunucu",
+  "name": "radyo-klan",
   "version": "1.0.0",
   "description": "Radyo Klan Canli Sunucu",
   "main": "server.js",
