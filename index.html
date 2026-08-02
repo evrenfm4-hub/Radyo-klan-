@@ -8,26 +8,53 @@
         body {
             font-family: Arial, sans-serif;
             text-align: center;
-            background-color: #f4f4f9;
+            background-color: #121826;
+            color: white;
             margin: 0;
-            padding: 50px;
+            padding: 20px;
         }
-        h1 { color: #333; }
+        h1 { color: #ff4757; }
         .btn {
             background-color: #ff4757;
             color: white;
             border: none;
-            padding: 15px 30px;
-            font-size: 18px;
+            padding: 12px 25px;
+            font-size: 16px;
             border-radius: 8px;
             cursor: pointer;
-            margin-top: 20px;
+            margin-top: 10px;
         }
         .btn:hover { background-color: #ff6b81; }
-        #status {
-            margin-top: 20px;
-            font-size: 18px;
-            color: #555;
+        
+        #chatBox {
+            width: 90%;
+            max-width: 400px;
+            height: 200px;
+            background-color: #1f293d;
+            border: 1px solid #374151;
+            border-radius: 8px;
+            margin: 15px auto;
+            padding: 10px;
+            overflow-y: auto;
+            text-align: left;
+            font-size: 14px;
+        }
+        .chat-message {
+            margin-bottom: 8px;
+            padding: 5px;
+            background: #374151;
+            border-radius: 5px;
+        }
+        .input-container {
+            margin-top: 10px;
+        }
+        input[type="text"] {
+            width: 65%;
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #374151;
+            background-color: #1f293d;
+            color: white;
         }
     </style>
 </head>
@@ -37,14 +64,26 @@
     <p>WePlay tarzı canlı 2 kişilik sesli bilgi yarışması</p>
     
     <button class="btn" id="startBtn">YENİ OYUN</button>
-    <div id="status"></div>
+    <div id="status" style="margin: 10px; color: #10b981; font-weight: bold;"></div>
 
-    <!-- Socket.IO Kütüphanesi -->
+    <!-- Genel Sohbet Alanı -->
+    <div id="chatBox"></div>
+
+    <div class="input-container">
+        <input type="text" id="messageInput" placeholder="Mesaj yaz...">
+        <button class="btn" id="sendBtn" style="margin-top:0; padding: 10px 15px;">Gönder</button>
+    </div>
+
     <script src="/socket.io/socket.io.js"></script>
     <script>
         const socket = io();
         const startBtn = document.getElementById('startBtn');
         const statusDiv = document.getElementById('status');
+        const chatBox = document.getElementById('chatBox');
+        const messageInput = document.getElementById('messageInput');
+        const sendBtn = document.getElementById('sendBtn');
+
+        const myName = 'Evren';
 
         startBtn.addEventListener('click', () => {
             statusDiv.innerText = 'Rastgele rakip aranıyor...';
@@ -57,7 +96,31 @@
         });
 
         socket.on('match-found', (data) => {
-            statusDiv.innerText = 'Rakip bulundu! Oyun başlıyor... (Oda ID: ' + data.roomId + ')';
+            statusDiv.innerText = 'Rakip bulundu! Oda: ' + data.roomId;
+        });
+
+        sendBtn.addEventListener('click', sendMessage);
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
+        });
+
+        function sendMessage() {
+            const text = messageInput.value.trim();
+            if (text) {
+                socket.emit('chat-message', {
+                    message: text,
+                    sender: myName
+                });
+                messageInput.value = '';
+            }
+        }
+
+        socket.on('chat-message', (data) => {
+            const msgDiv = document.createElement('div');
+            msgDiv.className = 'chat-message';
+            msgDiv.innerHTML = `<b>${data.sender}:</b> ${data.message}`;
+            chatBox.appendChild(msgDiv);
+            chatBox.scrollTop = chatBox.scrollHeight;
         });
     </script>
 
