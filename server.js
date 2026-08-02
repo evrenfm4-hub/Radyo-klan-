@@ -8,19 +8,35 @@ const io = new Server(server);
 
 app.use(express.static(__dirname));
 
+let waitingPlayer = null;
+
 io.on('connection', (socket) => {
-  console.log('Bir kullanıcı bağlandı:', socket.id);
+    console.log('Bir kullanıcı bağlandı:', socket.id);
 
-  socket.on('chatMessage', (msg) => {
-    io.emit('chatMessage', msg);
-  });
+    socket.on('find-match', () => {
+        if (waitingPlayer) {
+            // Eşleşme bulundu
+            const room = 'room_' + socket.id;
+            socket.join(room);
+            waitingPlayer.join(room);
 
-  socket.on('disconnect', () => {
-    console.log('Kullanıcı ayrıldı:', socket.id);
-  });
+            io.to(room).emit('match-found', { roomId: room });
+            waitingPlayer = null;
+        } else {
+            waitingPlayer = socket;
+            socket.emit('waiting', 'Rakip aranıyor...');
+        }
+    });
+
+    socket.on('disconnect', () => {
+        if (waitingPlayer === socket) {
+            waitingPlayer = null;
+        }
+        console.log('Kullanıcı ayrıldı:', socket.id);
+    });
 });
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`Sunucu ${PORT} portunda çalışıyor.`);
+    console.log(`Sunucu ${PORT} portunda çalışıyor.`);
 });
