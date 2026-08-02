@@ -7,7 +7,6 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-// Statik dosyaları sun (index.html ana dizinde veya public klasöründe olmalı)
 app.use(express.static(path.join(__dirname, '.')));
 
 io.on('connection', (socket) => {
