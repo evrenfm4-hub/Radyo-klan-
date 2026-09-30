@@ -1,27 +1,63 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const path = require('path');
+const cors = require('cors');
 
 const app = express();
-const server = http.createServer(app);
-const io = new Server(server);
+app.use(cors());
 
-app.use(express.static(path.join(__dirname, '.')));
+const server = http.createServer(app);
+const io = new Server(server, {
+    cors: { 
+        origin: "*", 
+        methods: ["GET", "POST"] 
+    }
+});
+
+let eslesmeKuyrugu = [];
 
 io.on('connection', (socket) => {
-    console.log('Bir kullanıcı bağlandı.');
+    console.log('Bir kullanıcı bağlandı:', socket.id);
 
+    // 1. Canlı Lobi Mesajları
     socket.on('chat-message', (data) => {
         io.emit('chat-message', data);
     });
 
+    // 2. Gerçek Oyuncu Eşleştirme Kuyruğu
+    socket.on('rakip-ara', (username) => {
+        console.log(`${username} eşleşme arıyor...`);
+        
+        // Eğer kuyrukta bekleyen başka biri varsa eşleştir
+        if (eslesmeKuyrugu.length > 0) {
+            const rakip = eslesmeKuyrugu.shift();
+            const odaAdi = 'oda_' + socket.id + '_' + rakip.id;
+
+            socket.join(odaAdi);
+            rakip.socket.join(odaAdi);
+
+            io.to(socket.id).emit('eslesme-basarili', { rakipAdi: rakip.name, oda: odaAdi });
+            io.to(rakip.id).emit('eslesme-basarili', { rakipAdi: username, oda: odaAdi });
+            console.log(`Eşleşme sağlandı: ${username} & ${rakip.name}`);
+        } else {
+            // İkinci oyuncu yoksa kuyruğa ekle ve beklemesini söyle
+            eslesmeKuyrugu.push({ id: socket.id, socket: socket, name: username });
+            socket.emit('kuyrukta-bekle');
+        }
+    });
+
+    // 3. Düello İçi Mesajlaşma / Hamleler
+    socket.on('duello-hamle', (data) => {
+        io.to(data.oda).emit('duello-hamle', data);
+    });
+
     socket.on('disconnect', () => {
-        console.log('Kullanıcı ayrıldı.');
+        eslesmeKuyrugu = eslesmeKuyrugu.filter(item => item.id !== socket.id);
+        console.log('Kullanıcı ayrıldı:', socket.id);
     });
 });
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-    console.log(`Sunucu ${PORT} portunda çalışıyor.`);
+    console.log(`Sunucu ${PORT} portunda aktif!`);
 });
