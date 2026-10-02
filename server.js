@@ -1,5 +1,6 @@
 const express = require('express');
 const http = require('http');
+const axios = require('axios');
 const { Server } = require('socket.io');
 
 const app = express();
@@ -8,47 +9,75 @@ const io = new Server(server, {
   cors: { origin: "*" }
 });
 
-// Türkçe Şarkı Kütüphanesi
-const SONGS = [
-  {
-    title: "Sana Kalbim Geçti",
-    artist: "Yıldız Tilbe",
-    lyrics: ["Sana kalbim geçti aman", "Geri versen almam almam", "Sana kalbim geçti - Yıldız TİLBE"]
-  },
-  {
-    title: "İntihaş",
-    artist: "Onurcan Özcan",
-    lyrics: ["Yalnızlığa yalnız", "Seninle aldattım kıskandı yıldızlar", "Aşka inanmayanlara seni anlattım"]
-  },
-  {
-    title: "Acıyı Sevmek Olur Mu",
-    artist: "Mehmet Erdem",
-    lyrics: ["Şu yüreğim ne meraklı", "Hiç sözümü dinlemiyor", "Sorarım aşk durulur mu", "Acıyı sevmek olur mu"]
-  },
-  {
-    title: "Seni Affedemiyorum",
-    artist: "Uğur Karakuş",
-    lyrics: ["Bir daha kapımı çalma", "Sakın ha arama sorma", "Aşkından ölsem bile", "Affederim seni sanma"]
-  },
-  {
-    title: "Gitme",
-    artist: "Tarkan",
-    lyrics: ["Gitme desem canım kalır mısın benimle", "Gitme desem canım sever misin beni yine"]
-  }
+// Render Sunucusunu Uyanık Tutma (Self-Ping)
+const SERVER_URL = process.env.RENDER_EXTERNAL_URL || "https://mikrofon-sende.onrender.com";
+setInterval(() => {
+  axios.get(SERVER_URL).catch(() => {});
+}, 10 * 60 * 1000); // 10 dakikada bir ping atar
+
+app.get('/', (req, res) => {
+  res.send('Mikrofon Sende Sunucusu Aktif!');
+});
+
+// Popüler Türkçe Şarkı Havuzu (API'den aranacak isimler)
+const SEARCH_POOL = [
+  "Tarkan Gitme", "Sezen Aksu Gülümse", "Mabel Matiz Karakol", 
+  "Manga Dursun Zaman", "Duman Seni Kendime Sakladım", "Teoman Papatya",
+  "Hadise Aşk Kaç Beden Giyer", "Mert Demir Antidepresan", "Yıldız Tilbe Çat Kapı",
+  "Kenan Doğulu Çakkıdı", "Mor ve Ötesi Bir Derdim Var", "Sertab Erener Rengarenk"
 ];
 
-let players = []; // Odadaki oyuncular (Max 6)
-let currentSongIndex = 0;
-let gameState = 'waiting'; // 'waiting', 'countdown', 'singing'
+let maxSeats = 6;
+let players = [];
+let totalRoundsPlayed = 0;
+const MAX_ROUNDS = 12;
+
+let gameState = 'chatting';
 let currentSinger = null;
 let countdownTimer = null;
+let singingTimer = null;
+let currentSongData = null;
+
+// İnternetten (Lyrics.ovh API) Dinamik Şarkı Çekme Fonksiyonu
+async function fetchRandomSong() {
+  const query = SEARCH_POOL[Math.floor(Math.random() * SEARCH_POOL.length)];
+  const [artist, title] = query.split(" ");
+
+  try {
+    const res = await axios.get(`https://api.lyrics.ovh/v1/${encodeURIComponent(artist)}/${encodeURIComponent(title)}`);
+    if (res.data && res.data.lyrics) {
+      const lines = res.data.lyrics.split('\n').filter(l => l.trim() !== '');
+      // Telif ve ekranda düzgün görünmesi için en fazla 3-4 satırlık kısa nakarat kesiti alınır
+      const snippet = lines.slice(0, 3);
+      return {
+        title: title,
+        artist: artist,
+        lyrics: snippet.length > 0 ? snippet : ["Sözler yüklendi, sahne senin!"]
+      };
+    }
+  } catch (err) {
+    console.log("API İstek hatası, varsayılan şarkı kullanılıyor.");
+  }
+
+  // API bağlantısı yavaşlarsa veya yanıt vermezse yedek şarkı
+  return {
+    title: query,
+    artist: "Popüler Sanatçı",
+    lyrics: ["Sana kalbim geçti aman", "Geri versen almam almam"]
+  };
+}
 
 io.on('connection', (socket) => {
-  console.log('Yeni oyuncu bağlandı:', socket.id);
+  socket.emit('room_config', { maxSeats, gameState, round: totalRoundsPlayed, maxRounds: MAX_ROUNDS });
+
+  socket.on('set_max_seats', (count) => {
+    maxSeats = parseInt(count) || 6;
+    io.emit('room_config', { maxSeats, gameState, round: totalRoundsPlayed, maxRounds: MAX_ROUNDS });
+  });
 
   socket.on('join', (data) => {
-    if (players.length >= 6) {
-      socket.emit('error_msg', 'Oda dolu! (Max 6 Oyuncu)');
+    if (players.length >= maxSeats) {
+      socket.emit('error_msg', 'Oda dolu!');
       return;
     }
 
@@ -61,52 +90,95 @@ io.on('connection', (socket) => {
     players.push(newPlayer);
     socket.emit('init_player', newPlayer);
     io.emit('update_players', players);
+  });
 
-    // İlk oyuncular geldiğinde turu başlat
-    if (players.length >= 1 && gameState === 'waiting') {
-      startNextRound();
+  socket.on('start_game_manual', async () => {
+    if (gameState === 'chatting' && players.length > 0) {
+      totalRoundsPlayed = 0;
+      await startNextRound();
     }
   });
 
   socket.on('catch_mic', () => {
     if (gameState === 'countdown' && !currentSinger) {
       clearInterval(countdownTimer);
+
       const player = players.find(p => p.id === socket.id);
       if (player) {
         currentSinger = player;
         gameState = 'singing';
-        io.emit('mic_caught', { singer: currentSinger, song: SONGS[currentSongIndex] });
+        
+        let singTimeLeft = 10;
+        io.emit('mic_caught', { 
+          singer: currentSinger, 
+          song: currentSongData,
+          duration: singTimeLeft 
+        });
 
-        // 15 saniye söyleme süresi
-        setTimeout(() => {
-          startNextRound();
-        }, 15000);
+        singingTimer = setInterval(async () => {
+          singTimeLeft--;
+          if (singTimeLeft > 0) {
+            io.emit('singing_tick', singTimeLeft);
+          } else {
+            clearInterval(singingTimer);
+            totalRoundsPlayed++;
+            
+            if (totalRoundsPlayed >= MAX_ROUNDS) {
+              endGame();
+            } else {
+              await startNextRound();
+            }
+          }
+        }, 1000);
       }
     }
   });
 
-  socket.on('disconnect', () => {
-    players = players.filter(p => p.id !== socket.id);
-    // Koltuk numaralarını yeniden düzenle
-    players.forEach((p, idx) => p.seat = idx + 1);
-    io.emit('update_players', players);
+  socket.on('leave_game', () => {
+    removePlayer(socket.id);
+  });
 
-    if (currentSinger && currentSinger.id === socket.id) {
-      startNextRound();
-    }
+  socket.on('disconnect', () => {
+    removePlayer(socket.id);
   });
 });
 
-function startNextRound() {
+function removePlayer(socketId) {
+  players = players.filter(p => p.id !== socketId);
+  players.forEach((p, idx) => p.seat = idx + 1);
+  io.emit('update_players', players);
+
+  if (players.length === 0) {
+    clearInterval(countdownTimer);
+    clearInterval(singingTimer);
+    gameState = 'chatting';
+    totalRoundsPlayed = 0;
+    currentSinger = null;
+    io.emit('reset_stage');
+  }
+}
+
+async function startNextRound() {
+  if (players.length === 0) {
+    gameState = 'chatting';
+    return;
+  }
+
   gameState = 'countdown';
   currentSinger = null;
-  currentSongIndex = Math.floor(Math.random() * SONGS.length);
-  const currentSong = SONGS[currentSongIndex];
+  
+  // İnternetten dinamik olarak şarkı çekilir
+  currentSongData = await fetchRandomSong();
 
-  let timeLeft = 3;
-  io.emit('round_start', { song: currentSong, countdown: timeLeft });
+  let timeLeft = 5;
+  io.emit('round_start', { 
+    song: currentSongData, 
+    countdown: timeLeft, 
+    round: totalRoundsPlayed + 1, 
+    maxRounds: MAX_ROUNDS 
+  });
 
-  countdownTimer = setInterval(() => {
+  countdownTimer = setInterval(async () => {
     timeLeft--;
     if (timeLeft > 0) {
       io.emit('countdown_tick', timeLeft);
@@ -114,12 +186,22 @@ function startNextRound() {
       clearInterval(countdownTimer);
       if (!currentSinger) {
         io.emit('no_one_caught');
-        setTimeout(() => {
-          startNextRound();
-        }, 2000);
+        totalRoundsPlayed++;
+        
+        if (totalRoundsPlayed >= MAX_ROUNDS) {
+          endGame();
+        } else {
+          setTimeout(async () => await startNextRound(), 2000);
+        }
       }
     }
   }, 1000);
+}
+
+function endGame() {
+  gameState = 'chatting';
+  totalRoundsPlayed = 0;
+  io.emit('game_over');
 }
 
 const PORT = process.env.PORT || 3000;
