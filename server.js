@@ -12,25 +12,17 @@ const io = new Server(server, {
 const PORT = process.env.PORT || 3000;
 const rooms = {};
 
-// Amatör / Telifsiz Şarkı Havuzu (Cover sesler ve sözler)
-const amateurSongPool = [
+// Sadece Vokal / Çıplak Ses (Müziksiz Cover) Ses Havuzu
+const amateurAcapellaPool = [
     {
-        title: "Dillere Düşen (Cover)",
+        title: "Dillere Düşen (Acapella Cover)",
         artist: "Amatör Ses Havuzu",
-        audioUrl: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
-        lyrics: "Yollar, yollar aşılmıyor yollar...\nGözüm yolda, kulağım seste..."
+        audioUrl: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" // Projede gerçek a capella/çıplak ses linkleri kullanılabilir
     },
     {
-        title: "Gece Yolculuğu (Cover)",
+        title: "Gece Yolculuğu (Acapella Cover)",
         artist: "Amatör Ses Havuzu",
-        audioUrl: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3",
-        lyrics: "Karanlık gecenin ta ortasında...\nBir ses duyulur uzaktan..."
-    },
-    {
-        title: "Yalnız Gemi (Cover)",
-        artist: "Amatör Ses Havuzu",
-        audioUrl: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3",
-        lyrics: "Dalgalar vurur sahile sessizce...\nİçimde kalan son umutla..."
+        audioUrl: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3"
     }
 ];
 
@@ -54,8 +46,10 @@ io.on('connection', (socket) => {
         if (!rooms[roomCode]) {
             rooms[roomCode] = {
                 players: {},
-                maxPlayers: 6,
-                isGameStarted: false
+                maxPlayers: 10, // 10 Oyuncuya kadar destek
+                isGameStarted: false,
+                currentSingerIndex: 0,
+                turnTimer: null
             };
         }
 
@@ -92,13 +86,14 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Oyunu Başlat: 3 Saniye Geri Sayım + Ses Efekti Tetikleyici
+    // Oyunu Başlat: 3 Saniye Geri Sayım + Zil Efekti
     socket.on('start_game_manual', (data) => {
         const { roomCode } = data;
         const room = rooms[roomCode];
         if (room) {
             room.isGameStarted = true;
-            let countdown = 3; // 3 Saniye geri sayım
+            room.currentSingerIndex = 0;
+            let countdown = 3;
 
             io.to(roomCode).emit('game_starting', { countdown });
 
@@ -108,18 +103,57 @@ io.on('connection', (socket) => {
                     io.to(roomCode).emit('countdown_tick', { countdown });
                 } else {
                     clearInterval(timer);
-                    
-                    // Rastgele bir telifsiz amatör şarkı seç
-                    const randomSong = amateurSongPool[Math.floor(Math.random() * amateurSongPool.length)];
-
-                    // Şarkı ekranını aç ve 5 saniyelik şarkı sözü verme süresini başlat
-                    io.to(roomCode).emit('round_start', {
-                        song: randomSong,
-                        duration: 5 // 5 saniye şarkı sözü gösterim/söyleme süresi
-                    });
+                    startNextPlayerTurn(roomCode);
                 }
             }, 1000);
         }
+    });
+
+    // Her Oyuncuya Sırayla Şarkı Söyleme Süresi Verme (Örn: Oyuncu başına 15 saniye)
+    function startNextPlayerTurn(roomCode) {
+        const room = rooms[roomCode];
+        if (!room) return;
+
+        const playerSeats = Object.keys(room.players).sort();
+        if (playerSeats.length === 0) return;
+
+        // Sıradaki oyuncuyu seç
+        if (room.currentSingerIndex >= playerSeats.length) {
+            room.currentSingerIndex = 0; // Tur bittiğinde başa dön veya oyunu bitir
+        }
+
+        const currentSeat = playerSeats[room.currentSingerIndex];
+        const singer = room.players[currentSeat];
+        const randomSong = amateurAcapellaPool[Math.floor(Math.random() * amateurAcapellaPool.length)];
+
+        let singDuration = 15; // Her oyuncunun şarkı söylemek için sahip olduğu süre (saniye)
+
+        io.to(roomCode).emit('player_turn_start', {
+            singerName: singer.name,
+            seatIndex: currentSeat,
+            song: randomSong,
+            duration: singDuration
+        });
+
+        // Süre sayacını başlat
+        if (room.turnTimer) clearInterval(room.turnTimer);
+
+        room.turnTimer = setInterval(() => {
+            singDuration--;
+            if (singDuration <= 0) {
+                clearInterval(room.turnTimer);
+                room.currentSingerIndex++;
+                startNextPlayerTurn(roomCode); // Sonraki oyuncuya geç
+            } else {
+                io.to(roomCode).emit('turn_countdown_tick', { timeLeft: singDuration });
+            }
+        }, 1000);
+    }
+
+    // Yakala Butonuna Basıldığında Puanlama veya Reaksiyon
+    socket.on('catch_song', (data) => {
+        const { roomCode, playerName } = data;
+        io.to(roomCode).emit('song_caught', { catcher: playerName });
     });
 
     socket.on('leave_room', (data) => {
