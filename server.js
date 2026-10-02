@@ -6,57 +6,29 @@ const axios = require('axios');
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
-    cors: {
-        origin: "*",
-        methods: ["GET", "POST"]
-    }
+    cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
 const PORT = process.env.PORT || 3000;
-
-// Oda verilerini tutan obje
 const rooms = {};
 
-// Express Statik ve Test Sayfası
 app.get('/', (req, res) => {
     res.send('Radyo Klan - Mikrofon Sende Karaoke Sunucusu Aktif!');
 });
 
-// Render Uyanık Tutma (Self-Ping)
+// Render Uyanık Tutma
 setInterval(() => {
-    axios.get('https://' + process.env.RENDER_EXTERNAL_HOSTNAME)
-        .then(() => console.log('Self-ping başarılı.'))
-        .catch(err => console.log('Self-ping hatası veya yerel ortam.'));
-}, 14 * 60 * 1000); // 14 dakikada bir çalışır
-
-// Şarkı Sözü Çekme Fonksiyonu
-async function fetchAndSendNextSong(roomCode) {
-    const room = rooms[roomCode];
-    if (!room) return;
-
-    try {
-        // Örnek şarkı havuzu / API çağrısı
-        const songData = {
-            title: "Tarkan - Geççek",
-            lyrics: "Geççek geççek çok az kaldı geççek...",
-            duration: 30
-        };
-
-        room.currentSong = songData;
-        io.to(roomCode).emit('new_song', songData);
-        console.log(`Oda ${roomCode} için yeni şarkı gönderildi: ${songData.title}`);
-    } catch (error) {
-        console.error("Şarkı çekme hatası:", error);
+    if (process.env.RENDER_EXTERNAL_HOSTNAME) {
+        axios.get('https://' + process.env.RENDER_EXTERNAL_HOSTNAME).catch(() => {});
     }
-}
+}, 14 * 60 * 1000);
 
-// Socket.IO Bağlantı Yönetimi
 io.on('connection', (socket) => {
-    console.log('Yeni bir kullanıcı bağlandı:', socket.id);
+    console.log('Bağlandı:', socket.id);
 
-    // Odaya Katılma
+    // Odaya Katılma ve Otomatik Koltuk Atama
     socket.on('join_room', (data) => {
-        const { roomCode, playerName, seatIndex } = data;
+        const { roomCode, playerName } = data;
         socket.join(roomCode);
 
         if (!rooms[roomCode]) {
@@ -68,60 +40,113 @@ io.on('connection', (socket) => {
             };
         }
 
-        rooms[roomCode].players[seatIndex] = {
+        const room = rooms[roomCode];
+
+        // Boş olan ilk koltuğu bul ve oyuncuyu yerleştir
+        let assignedSeat = null;
+        for (let i = 1; i <= room.maxPlayers; i++) {
+            if (!room.players[i]) {
+                assignedSeat = i;
+                break;
+            }
+        }
+
+        if (!assignedSeat) {
+            socket.emit('error_msg', 'Oda dolu!');
+            return;
+        }
+
+        room.players[assignedSeat] = {
             id: socket.id,
             name: playerName
         };
 
-        io.to(roomCode).emit('room_state', rooms[roomCode]);
-        console.log(`${playerName} (${socket.id}) ${roomCode} odasındaki ${seatIndex}. koltuğa oturdu.`);
+        socket.emit('assigned_seat', { seatIndex: assignedSeat });
+        io.to(roomCode).emit('room_state', room);
+        console.log(`${playerName} (${socket.id}) ${roomCode} odası ${assignedSeat}. koltuğa oturdu.`);
     });
 
-    // Oyuncu Sayısını Ayarla
+    // Oyuncu Sayısını Güncelleme
     socket.on('set_max_players', (data) => {
         const { roomCode, maxPlayers } = data;
         if (rooms[roomCode]) {
-            rooms[roomCode].maxPlayers = maxPlayers;
-            io.to(roomCode).emit('max_players_updated', { maxPlayers: maxPlayers });
-            console.log(`Oda ${roomCode} maksimum oyuncu sayısı: ${maxPlayers}`);
+            rooms[roomCode].maxPlayers = parseInt(maxPlayers);
+            io.to(roomCode).emit('room_state', rooms[roomCode]);
         }
     });
 
-    // Oyunu Manuel Başlat
+    // Oyunu Manuel Başlat ve Geri Sayım Gönder
     socket.on('start_game_manual', (data) => {
         const { roomCode } = data;
         const room = rooms[roomCode];
-        if (room && !room.isGameStarted) {
+        if (room) {
             room.isGameStarted = true;
-            io.to(roomCode).emit('game_starting', { countdown: 5 });
-            console.log(`Oda ${roomCode} için oyun başlatılıyor...`);
+            let countdown = 10; // 10 saniye geri sayım
 
-            setTimeout(() => {
-                fetchAndSendNextSong(roomCode);
-            }, 5000);
+            io.to(roomCode).emit('game_starting', { countdown });
+            console.log(`Oda ${roomCode} için geri sayım başladı.`);
+
+            const timer = setInterval(() => {
+                countdown--;
+                if (countdown > 0) {
+                    io.to(roomCode).emit('countdown_tick', { countdown });
+                } else {
+                    clearInterval(timer);
+                    // Şarkıyı başlat
+                    room.currentSong = {
+                        title: "Tarkan - Geççek",
+                        lyrics: "Geççek geççek çok az kaldı geççek...",
+                        artist: "Tarkan"
+                    };
+                    io.to(roomCode).emit('round_start', { song: room.currentSong });
+                }
+            }, 1000);
         }
     });
 
-    // Odadan Çıkış İşlemi
+    // Odadan Çıkış
     socket.on('leave_room', (data) => {
-        const { roomCode, seatIndex } = data;
-        if (rooms[roomCode]) {
-            if (rooms[roomCode].players && rooms[roomCode].players[seatIndex]) {
-                delete rooms[roomCode].players[seatIndex];
+        const { roomCode } = data;
+        const room = rooms[roomCode];
+        if (room) {
+            for (let seat in room.players) {
+                if (room.players[seat].id === socket.id) {
+                    delete room.players[seat];
+                    break;
+                }
             }
             socket.leave(roomCode);
-            io.to(roomCode).emit('player_left', { seatIndex: seatIndex, socketId: socket.id });
-            console.log(`Kullanıcı ${socket.id} ${roomCode} odasından ayrıldı.`);
+            io.to(roomCode).emit('room_state', room);
         }
     });
 
-    // Bağlantı Kopması
+    // WebRTC Sinyalleşmesi
+    socket.on('offer', (data) => {
+        socket.to(data.roomCode).emit('offer', { offer: data.offer, sender: socket.id });
+    });
+    socket.on('answer', (data) => {
+        socket.to(data.roomCode).emit('answer', { answer: data.answer, sender: socket.id });
+    });
+    socket.on('ice-candidate', (data) => {
+        socket.to(data.roomCode).emit('ice-candidate', { candidate: data.candidate, sender: socket.id });
+    });
+
     socket.on('disconnect', () => {
-        console.log('Kullanıcı ayrıldı:', socket.id);
-        // İsteğe bağlı bağlantı kopunca koltuk boşaltma mantığı buraya gelir
+        for (let roomCode in rooms) {
+            let room = rooms[roomCode];
+            let changed = false;
+            for (let seat in room.players) {
+                if (room.players[seat].id === socket.id) {
+                    delete room.players[seat];
+                    changed = true;
+                }
+            }
+            if (changed) {
+                io.to(roomCode).emit('room_state', room);
+            }
+        }
+        console.log('Kullanıcı çıktı:', socket.id);
     });
 });
 
-server.listen(PORT, () => {
-    console.log(`Sunucu ${PORT} portunda çalışıyor.`);
-});
+server.listen(PORT, () => console.log(`Sunucu ${PORT} portunda çalışıyor.`));
