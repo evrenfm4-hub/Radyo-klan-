@@ -4,132 +4,100 @@ const { Server } = require('socket.io');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, {
+    cors: { origin: "*" }
+});
 
-app.use(express.static('public'));
-
-const rooms = {};
-
-// İnternetten veya havuzdan çekilen 4 satırlık nakarat sözleri
-const songDatabase = [
-    { title: "mavi", artist: "Barış Akarsu", lyrics: "mavi mavi gözlerinde hep sitem mi var\nyoksa insan sevdiğine böyle mi bakar" },
-    { title: "şımarık", artist: "Tarkan", lyrics: "yilani deliginden çikaran\nkaderim puskullu belam\nyakalarsam\nmuck muck" },
-    { title: "Sana Kalbim Geçti", artist: "Yıldız Tilbe", lyrics: "Sana kalbim geçti aman\nGeri versen almam almam\nSeni sevdim seveli\nBaşım beladan çıkmıyor" }
+// Şarkı Sözü Havuzu (Server tarafında tutulur)
+const internetSongPool = [
+    { title: "Mavi", artist: "Barış Akarsu", lyrics: ["mavi mavi gözlerimde hep sitem mi var", "yoksa insan sevdiğine böyle mi bakar", "gözlerinde aşkın ateşi sönüyor", "kalbim durmuş sanki sana dönüyor"] },
+    { title: "Şımarık", artist: "Tarkan", lyrics: ["yılani deliginden cikaran kaderim", "puskullu belam yakalarsam", "muck muck öp beni boynumdan", "kollarında çürüyeyim yanıyorum"] },
+    { title: "Sana Kalbim Geçti", artist: "Yıldız Tilbe", lyrics: ["sana kalbim geçti aman", "geri versen almam almam", "sensiz bu dünya zindan", "böyle sevmek olmaz olsun"] },
+    { title: "Unutamam Seni", artist: "Tarkan", lyrics: ["unutamam seni unutamam", "ateşlerde yansam da", "kül olsam da inan", "seni unutup da başkasını sevemem"] },
+    { title: "Arada Sırada", artist: "Ajda Pekkan", lyrics: ["arada sırada da olsa", "beni hatırla yeter", "uzaklarda olsan bile", "bu hasret böyle biter"] },
+    { title: "Mor Şalvar", artist: "Hande Yener", lyrics: ["mor şalvar giyerim oyna", "gönlümü eylerim oyna", "senin gibi yari ben", "bulamam dünyada oyna"] },
+    { title: "Aşkın Mapushanesi", artist: "Sezen Aksu", lyrics: ["vurulduğum yerde kaldım", "aşkın mapushanesi", "gözlerinin rengine aldandım", "söndü içimin neşesi"] },
+    { title: "Dudu Dudu", artist: "Tarkan", lyrics: ["dudu dudu dilli bebek", "canımın içi meleksin", "sen bu gidişle kafayı", "bana yedireceksin"] },
+    { title: "Hadi Bakalım", artist: "Sezen Aksu", lyrics: ["hadi bakalım kolay gelsin", "aslanım benim yolunuz açık", "giden gider kalan akar", "devran döner"] },
+    { title: "Yalnız Kuş", artist: "Sertab Erener", lyrics: ["uçtu uçtu yalnız kuş", "dağları aştı gitti", "bana kalan eski bir düş", "bu hikaye burada bitti"] },
+    { title: "Beni Unutma", artist: "Emre Aydın", lyrics: ["gitmeme izin ver", "arkana bakmadan", "beni unutma sakın", "gözyaşım kurumadan"] },
+    { title: "Sarı Çiçek", artist: "Barış Manço", lyrics: ["söyle sarı çiçek sarı çiçek", "cennetin yolu nirededir", "ağam bizim eldedir", "bizim ilktedir"] }
 ];
 
-io.on('connection', (socket) => {
-    socket.on('joinRoom', ({ roomId, maxSeats, playerName }) => {
-        socket.join(roomId);
-
-        if (!rooms[roomId]) {
-            rooms[roomId] = {
-                maxSeats: parseInt(maxSeats),
-                players: {},
-                currentSongIndex: 0,
-                gameState: 'waiting',
-                catcher: null,
-                timer: null
-            };
-        }
-
-        const room = rooms[roomId];
-        let assignedSeat = null;
-
-        for (let i = 1; i <= room.maxSeats; i++) {
-            if (!room.players[i]) {
-                assignedSeat = i;
-                break;
-            }
-        }
-
-        if (!assignedSeat) {
-            socket.emit('errorMsg', 'Oda dolu!');
-            return;
-        }
-
-        room.players[assignedSeat] = { id: socket.id, name: playerName || `Oyuncu_${socket.id.slice(0,4)}` };
-
-        socket.emit('assignedSeat', { seatIndex: assignedSeat });
-        io.to(roomId).emit('updateRoomState', room);
-    });
-
-    socket.on('startGame', ({ roomId }) => {
-        const room = rooms[roomId];
-        if (!room) return;
-
-        room.gameState = 'countdown';
-        room.currentSongIndex = 0;
-
-        // 1. Aşama: 3 saniye geri sayım + Zirrrr sesi
-        io.to(roomId).emit('playBell', { type: 'zirrr', message: 'Oyun başlıyor!' });
-
-        setTimeout(() => {
-            startNextRound(roomId);
-        }, 3000);
-    });
-
-    function startNextRound(roomId) {
-        const room = rooms[roomId];
-        if (!room) return;
-
-        if (room.currentSongIndex >= 12) {
-            room.gameState = 'ended';
-            const playerKeys = Object.keys(room.players);
-            const winnerKey = playerKeys[Math.floor(Math.random() * playerKeys.length)];
-            const winnerName = room.players[winnerKey] ? room.players[winnerKey].name : 'Berabere';
-            io.to(roomId).emit('gameOver', { winner: winnerName });
-            return;
-        }
-
-        room.gameState = 'singing_wait';
-        room.catcher = null;
-
-        // Herkesin mikrofonu otomatik kapanır
-        io.to(roomId).emit('muteAllMics');
-
-        const currentSong = songDatabase[Math.floor(Math.random() * songDatabase.length)];
-        
-        io.to(roomId).emit('newSongData', {
-            songIndex: room.currentSongIndex + 1,
-            title: currentSong.title,
-            artist: currentSong.artist,
-            lyrics: currentSong.lyrics
-        });
-
-        // 2. Aşama: 5 saniyelik ikinci geri sayım (Sözler ekranda bekler, mikrofonlar kapalı)
-        setTimeout(() => {
-            io.to(roomId).emit('enableCatch', { type: 'zil' });
-            room.gameState = 'catching';
-        }, 5000);
+let rooms = {
+    "TRK6818": {
+        maxPlayers: 4,
+        players: {},
+        gameState: { currentRound: 1, maxRounds: 12, isRunning: false }
     }
+};
 
-    socket.on('catchSong', ({ roomId, seatIndex }) => {
-        const room = rooms[roomId];
-        if (!room || room.gameState !== 'catching' || room.catcher) return;
+io.on('connection', (socket) => {
+    console.log(`Bir kullanıcı bağlandı: ${socket.id}`);
 
-        room.catcher = seatIndex;
-        room.gameState = 'singing';
+    // Odaya Katılma
+    socket.on('join_room', (data) => {
+        const { roomCode, playerName, seatIndex } = data;
+        socket.join(roomCode);
+        
+        if (!rooms[roomCode]) {
+            rooms[roomCode] = { maxPlayers: 4, players: {}, gameState: { currentRound: 1, maxRounds: 12, isRunning: false } };
+        }
 
-        io.to(roomId).emit('playerCaught', { catcherSeat: seatIndex, playerName: room.players[seatIndex].name });
+        rooms[roomCode].players[seatIndex] = { id: socket.id, name: playerName };
+        io.to(roomCode).emit('room_state', rooms[roomCode]);
+    });
 
-        // 10 saniye okuma süresi
-        room.timer = setTimeout(() => {
-            room.currentSongIndex++;
-            startNextRound(roomId);
-        }, 10000);
+    // Oyuncu Sayısı Değiştirme (2, 4, 6)
+    socket.on('set_max_players', (data) => {
+        const { roomCode, maxPlayers } = data;
+        if (rooms[roomCode]) {
+            rooms[roomCode].maxPlayers = maxPlayers;
+            io.to(roomCode).emit('max_players_updated', { maxPlayers });
+            io.to(roomCode).emit('room_state', rooms[roomCode]);
+        }
+    });
+
+    // Oyunu Manuel Başlat
+    socket.on('start_game_manual', (data) => {
+        const { roomCode } = data;
+        if (rooms[roomCode]) {
+            rooms[roomCode].gameState.isRunning = true;
+            rooms[roomCode].gameState.currentRound = 1;
+            io.to(roomCode).emit('game_starting');
+            
+            // İlk şarkıyı gönder
+            sendRandomSong(roomCode);
+        }
+    });
+
+    // Şarkıyı Yakala Butonu
+    socket.on('catch_mic', (data) => {
+        const { roomCode, seatIndex } = data;
+        io.to(roomCode).emit('player_caught', { seatIndex });
+    });
+
+    // Odadan Çıkma / Ayrılma
+    socket.on('leave_room', (data) => {
+        const { roomCode, seatIndex } = data;
+        if (rooms[roomCode] && rooms[roomCode].players[seatIndex]) {
+            delete rooms[roomCode].players[seatIndex];
+            io.to(roomCode).emit('player_left', { seatIndex });
+        }
+        socket.leave(roomCode);
     });
 
     socket.on('disconnect', () => {
-        for (let roomId in rooms) {
-            let room = rooms[roomId];
-            for (let seat in room.players) {
-                if (room.players[seat].id === socket.id) {
-                    delete room.players[seat];
-                    io.to(roomId).emit('updateRoomState', room);
-                }
-            }
-        }
+        console.log(`Kullanıcı ayrıldı: ${socket.id}`);
     });
 });
 
-server.listen(3000, () => console.log('Sunucu 3000 portunda aktif.'));
+function sendRandomSong(roomCode) {
+    const randomSong = internetSongPool[Math.floor(Math.random() * internetSongPool.length)];
+    io.to(roomCode).emit('new_song', randomSong);
+}
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+    console.log(`Sunucu ${PORT} portunda çalışıyor...`);
+});
