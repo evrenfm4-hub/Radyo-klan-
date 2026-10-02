@@ -47,7 +47,6 @@ async function fetchRandomSong() {
     const res = await axios.get(`https://api.lyrics.ovh/v1/${encodeURIComponent(artist)}/${encodeURIComponent(title)}`);
     if (res.data && res.data.lyrics) {
       const lines = res.data.lyrics.split('\n').filter(l => l.trim() !== '');
-      // Telif ve ekranda düzgün görünmesi için en fazla 3-4 satırlık kısa nakarat kesiti alınır
       const snippet = lines.slice(0, 3);
       return {
         title: title,
@@ -56,10 +55,9 @@ async function fetchRandomSong() {
       };
     }
   } catch (err) {
-    console.log("API İstek hatası, varsayılan şarkı kullanılıyor.");
+    console.log("API İstek hatası, yedek şarkı kullanılıyor.");
   }
 
-  // API bağlantısı yavaşlarsa veya yanıt vermezse yedek şarkı
   return {
     title: query,
     artist: "Popüler Sanatçı",
@@ -167,7 +165,6 @@ async function startNextRound() {
   gameState = 'countdown';
   currentSinger = null;
   
-  // İnternetten dinamik olarak şarkı çekilir
   currentSongData = await fetchRandomSong();
 
   let timeLeft = 5;
