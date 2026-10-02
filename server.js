@@ -12,16 +12,18 @@ const io = new Server(server, {
 const PORT = process.env.PORT || 3000;
 const rooms = {};
 
-// Sadece Vokal / Çıplak Ses (Müziksiz Cover) Ses Havuzu
-const amateurAcapellaPool = [
+// Nakarat Odaklı Ses Havuzu (Şarkı + Sözleri)
+const chorusSongPool = [
     {
-        title: "Dillere Düşen (Acapella Cover)",
-        artist: "Amatör Ses Havuzu",
-        audioUrl: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" // Projede gerçek a capella/çıplak ses linkleri kullanılabilir
+        title: "Dillere Düşen",
+        artist: "Pop Cover",
+        lyrics: "Dilimde bir şarkı, gözümde yaşlar var...\nUnuttum seni sanma, kalbim hala yasta!",
+        audioUrl: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" // Kendi nakarat ses dosyanla değiştirebilirsin
     },
     {
-        title: "Gece Yolculuğu (Acapella Cover)",
-        artist: "Amatör Ses Havuzu",
+        title: "Gece Yolculuğu",
+        artist: "Akustik Vokal",
+        lyrics: "Giderken ardına bile bakmadın ya...\nİşte o an dünyam başıma yıkıldı ya!",
         audioUrl: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3"
     }
 ];
@@ -46,7 +48,7 @@ io.on('connection', (socket) => {
         if (!rooms[roomCode]) {
             rooms[roomCode] = {
                 players: {},
-                maxPlayers: 10, // 10 Oyuncuya kadar destek
+                maxPlayers: 10,
                 isGameStarted: false,
                 currentSingerIndex: 0,
                 turnTimer: null
@@ -54,7 +56,6 @@ io.on('connection', (socket) => {
         }
 
         const room = rooms[roomCode];
-
         let assignedSeat = null;
         for (let i = 1; i <= room.maxPlayers; i++) {
             if (!room.players[i]) {
@@ -68,10 +69,7 @@ io.on('connection', (socket) => {
             return;
         }
 
-        room.players[assignedSeat] = {
-            id: socket.id,
-            name: playerName
-        };
+        room.players[assignedSeat] = { id: socket.id, name: playerName };
 
         socket.emit('assigned_seat', { seatIndex: assignedSeat });
         io.to(roomCode).emit('room_state', room);
@@ -86,7 +84,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Oyunu Başlat: 3 Saniye Geri Sayım + Zil Efekti
     socket.on('start_game_manual', (data) => {
         const { roomCode } = data;
         const room = rooms[roomCode];
@@ -109,7 +106,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Her Oyuncuya Sırayla Şarkı Söyleme Süresi Verme (Örn: Oyuncu başına 15 saniye)
     function startNextPlayerTurn(roomCode) {
         const room = rooms[roomCode];
         if (!room) return;
@@ -117,16 +113,14 @@ io.on('connection', (socket) => {
         const playerSeats = Object.keys(room.players).sort();
         if (playerSeats.length === 0) return;
 
-        // Sıradaki oyuncuyu seç
         if (room.currentSingerIndex >= playerSeats.length) {
-            room.currentSingerIndex = 0; // Tur bittiğinde başa dön veya oyunu bitir
+            room.currentSingerIndex = 0;
         }
 
         const currentSeat = playerSeats[room.currentSingerIndex];
         const singer = room.players[currentSeat];
-        const randomSong = amateurAcapellaPool[Math.floor(Math.random() * amateurAcapellaPool.length)];
-
-        let singDuration = 15; // Her oyuncunun şarkı söylemek için sahip olduğu süre (saniye)
+        const randomSong = chorusSongPool[Math.floor(Math.random() * chorusSongPool.length)];
+        let singDuration = 15; // Her oyuncunun şarkı söyleme süresi
 
         io.to(roomCode).emit('player_turn_start', {
             singerName: singer.name,
@@ -135,7 +129,6 @@ io.on('connection', (socket) => {
             duration: singDuration
         });
 
-        // Süre sayacını başlat
         if (room.turnTimer) clearInterval(room.turnTimer);
 
         room.turnTimer = setInterval(() => {
@@ -143,14 +136,13 @@ io.on('connection', (socket) => {
             if (singDuration <= 0) {
                 clearInterval(room.turnTimer);
                 room.currentSingerIndex++;
-                startNextPlayerTurn(roomCode); // Sonraki oyuncuya geç
+                startNextPlayerTurn(roomCode);
             } else {
                 io.to(roomCode).emit('turn_countdown_tick', { timeLeft: singDuration });
             }
         }, 1000);
     }
 
-    // Yakala Butonuna Basıldığında Puanlama veya Reaksiyon
     socket.on('catch_song', (data) => {
         const { roomCode, playerName } = data;
         io.to(roomCode).emit('song_caught', { catcher: playerName });
@@ -160,20 +152,11 @@ io.on('connection', (socket) => {
         handleDisconnect(socket);
     });
 
-    // WebRTC Sinyalleşmesi
-    socket.on('offer', (data) => {
-        io.to(data.target).emit('offer', { offer: data.offer, sender: socket.id });
-    });
-    socket.on('answer', (data) => {
-        io.to(data.target).emit('answer', { answer: data.answer, sender: socket.id });
-    });
-    socket.on('ice-candidate', (data) => {
-        io.to(data.target).emit('ice-candidate', { candidate: data.candidate, sender: socket.id });
-    });
+    socket.on('offer', (data) => { io.to(data.target).emit('offer', { offer: data.offer, sender: socket.id }); });
+    socket.on('answer', (data) => { io.to(data.target).emit('answer', { answer: data.answer, sender: socket.id }); });
+    socket.on('ice-candidate', (data) => { io.to(data.target).emit('ice-candidate', { candidate: data.candidate, sender: socket.id }); });
 
-    socket.on('disconnect', () => {
-        handleDisconnect(socket);
-    });
+    socket.on('disconnect', () => { handleDisconnect(socket); });
 
     function handleDisconnect(sock) {
         for (let roomCode in rooms) {
