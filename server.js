@@ -63,7 +63,17 @@ const internetSongPool = [
     { title: "Ulan", artist: "Zeynep Bastık", lyrics: ["ulan ne hayaller kurmuştuk oysa", "hepsi birer rüya gibi uçtuursa", "yine de güzeldi sevmek seni", "hiç pişman değilim inanki"] },
     { title: "Gözlerinin Hapsindeyim", artist: "Fatih Erkoç", lyrics: ["gözlerinin hapsindeyim çoktan", "kaçamam artık bu aşktan", "ruhuma işledi varlığın", "sen benim en güzel yanımsın"] },
     { title: "Unutamadım", artist: "Barış Manço", lyrics: ["unutamadım unutamadım adını", "hâlâ kulağımda çınlar şarkın", "ne cefa bitti ne de bu hasret", "sen hala kalbimin başköşesindesin"] },
-    { title: "Ah Bu Şarkıların Gözü Konuşsun", artist: "Zeki Müren", lyrics: ["ah bu şarkıların gözü kör olsun", "insanı alıp eski günlere götürsün", "hatıralar canlanır birer birer", "gözyaşım yanaklarıma süzülür"] }
+    { title: "Ah Bu Şarkıların Gözü Konuşsun", artist: "Zeki Müren", lyrics: ["ah bu şarkıların gözü kör olsun", "insanı alıp eski günlere götürsün", "hatıralar canlanır birer birer", "gözyaşım yanaklarıma süzülür"] },
+    { title: "Değilim", artist: "Mebrure", lyrics: ["ben sen değilim senin gibi de değilim", "eski ben gibi bile değilim", "boşuna arama yorulma canım", "bıraktığın yerde de değilim"] },
+    { title: "Yansıma", artist: "Derya Uluğ", lyrics: ["sana hastayım anlasan ah", "şaka yapmadım anlasan ah-ah ah-ah-ah", "bana sabıka bağlasan ah", "bi' de sormadan harcasan ah-ah-ah-ah-ah-ah"] },
+    { title: "Gözlerinden Gözlerine", artist: "Semicenk", lyrics: ["bak yanıyor bak içimde", "taşıyor kalbimden", "düşerim yüksekten", "gözlerimden gözlerine"] },
+    { title: "Roman Olur Yazsam Seni", artist: "Velet", lyrics: ["roman olur yazsam seni", "şu semada yıldız gibi", "gözlerin gözlerime renktir benim", "aynı kefen sarsın bizi"] },
+    { title: "Ben Bilmem", artist: "Yalın", lyrics: ["biz bu aşkla göklere", "duyulmamış düşlere", "kirlenmemiş hayallere", "uçacaktık"] },
+    { title: "Değmesin Ellerimiz", artist: "Model", lyrics: ["değmesin ellerimiz", "değmesin ellerimiz", "buluşmasın bu gözler", "yine erir gideriz"] },
+    { title: "Yasemen", artist: "Doçent", lyrics: ["güneş bulur yakar seni", "külün' saçar açma yasemen", "şafak söktü kokun gelir", "derin uykuda böldü beni"] },
+    { title: "Afra ve Sefo", artist: "Aşiyan", lyrics: ["yaramadım ah denizleri", "yapamadım ama çok istedim", "değiştiremedim seni"] },
+    { title: "Sor", artist: "Serdar Ortaç", lyrics: ["ama sen korkaksın hiç bulaşma", "yaklaşmazsın gerçek aşklara", "demiş ki benden uzak olsun", "peki niye her gün ağlıyorsun"] },
+    { title: "Bir Gün Ol Yerimde", artist: "Doğu Swag ve Aleyna Tilki", lyrics: ["öyle başını alıp gitmek kolay ya", "bir gün ol yerimde", "savurup atmak kolay ya", "koştum hep peşinde"] }
 ];
 
 let rooms = {};
