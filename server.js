@@ -23,17 +23,15 @@ const internetSongPool = [
     { title: "Sarı Çiçek", artist: "Barış Manço", lyrics: ["söyle sarı çiçek sarı çiçek", "cennetin yolu nirededir", "ağam bizim eldedir", "bizim ilktedir"] }
 ];
 
-let rooms = {}; // { roomCode: { maxPlayers: 2, players: {}, gameState: {...} } }
+let rooms = {};
 
 io.on('connection', (socket) => {
-    console.log(`Bir kullanıcı bağlandı: ${socket.id}`);
+    console.log(`Kullanıcı bağlandı: ${socket.id}`);
 
-    // Oyuncu oda kapasitesi seçip katıldığında
     socket.on('join_matchmaking', (data) => {
         const { playerName, desiredMaxPlayers } = data;
         const maxP = parseInt(desiredMaxPlayers);
 
-        // Uygun ve henüz dolmamış, oyunu başlamamış bir oda ara
         let targetRoomCode = null;
         for (let code in rooms) {
             let room = rooms[code];
@@ -44,7 +42,6 @@ io.on('connection', (socket) => {
             }
         }
 
-        // Eğer uygun oda yoksa, yeni oda aç
         if (!targetRoomCode) {
             targetRoomCode = 'ODA-' + Math.floor(1000 + Math.random() * 9000);
             rooms[targetRoomCode] = {
@@ -56,7 +53,6 @@ io.on('connection', (socket) => {
 
         socket.join(targetRoomCode);
 
-        // Koltuk indeksi ata
         let room = rooms[targetRoomCode];
         let assignedSeat = -1;
         for (let i = 0; i < maxP; i++) {
@@ -76,12 +72,19 @@ io.on('connection', (socket) => {
             micActive: true
         };
 
-        // Oyuncuya hangi odaya girdiğini ve oda kodunu bildir
-        socket.emit('joined_room_success', { roomCode: targetRoomCode });
+        socket.emit('joined_room_success', { roomCode: targetRoomCode, id: socket.id });
+        
+        // Odaya yeni biri girdiğinde odadaki diğer kişilere bildir (WebRTC Peer bağlantısı için)
+        socket.to(targetRoomCode).emit('user_joined_room', { id: socket.id });
+        
         io.to(targetRoomCode).emit('room_state', formatRoomData(room));
     });
 
-    // Oyuncu Hazır Durumu
+    // WebRTC Sinyalleşme (Peer-to-Peer Ses Köprüsü)
+    socket.on('signal', (data) => {
+        io.to(data.to).emit('signal', { from: socket.id, signal: data.signal });
+    });
+
     socket.on('player_ready', (data) => {
         const { roomCode, isReady } = data;
         if (rooms[roomCode] && rooms[roomCode].players[socket.id]) {
@@ -91,7 +94,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Şarkıyı Yakala
     socket.on('catch_mic', (data) => {
         const { roomCode } = data;
         let room = rooms[roomCode];
@@ -101,6 +103,7 @@ io.on('connection', (socket) => {
             if (player) {
                 player.score += 10;
                 io.to(roomCode).emit('player_caught_mic', { 
+                    playerId: socket.id,
                     playerName: player.name, 
                     seatIndex: player.seatIndex 
                 });
@@ -112,9 +115,9 @@ io.on('connection', (socket) => {
         for (let roomCode in rooms) {
             if (rooms[roomCode].players[socket.id]) {
                 delete rooms[roomCode].players[socket.id];
+                io.to(roomCode).emit('user_left', { id: socket.id });
                 io.to(roomCode).emit('room_state', formatRoomData(rooms[roomCode]));
                 
-                // Oda tamamen boşaldıysa bellekten temizle
                 if (Object.keys(rooms[roomCode].players).length === 0) {
                     delete rooms[roomCode];
                 }
@@ -141,7 +144,6 @@ function checkAndStartGame(roomCode) {
     if (!room || room.gameState.isRunning) return;
 
     let playersArray = Object.values(room.players);
-    // Oda tam dolduysa VE herkes hazırsa oyunu başlat
     if (playersArray.length === room.maxPlayers && playersArray.every(p => p.isReady)) {
         room.gameState.isRunning = true;
         io.to(roomCode).emit('game_started_mode');
@@ -175,9 +177,9 @@ function startNextRound(roomCode) {
             if (rooms[roomCode]) {
                 startNextRound(roomCode);
             }
-        }, 10000); // 10 saniye şarkı söyleme süresi
+        }, 10000); 
 
-    }, 5000); // 5 saniye bekleme
+    }, 5000); 
 }
 
 const PORT = process.env.PORT || 3000;
