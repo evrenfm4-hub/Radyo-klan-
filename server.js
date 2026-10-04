@@ -6,7 +6,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: { origin: "*" },
-    maxHttpBufferSize: 1e8 // Büyük ses paketleri için
+    maxHttpBufferSize: 1e8 
 });
 
 const internetSongPool = [
@@ -69,9 +69,8 @@ io.on('connection', (socket) => {
         io.to(targetRoomCode).emit('room_state', formatRoomData(room));
     });
 
-    // --- WePlay Tarzı Sunucu Üzerinden Ses Aktarımı (Audio Relay) ---
+    // --- Ses Aktarımı (Yankı Önleme: Sadece diğer oyunculara gönderilir) ---
     socket.on('voice_data', (data) => {
-        // Kullanıcıdan gelen ses paketini, odadaki diğer herkese sunucu üzerinden ilet
         const { roomCode, audioChunk } = data;
         socket.to(roomCode).emit('voice_data', {
             senderId: socket.id,
@@ -138,6 +137,7 @@ function checkAndStartGame(roomCode) {
     if (!room || room.gameState.isRunning) return;
 
     let playersArray = Object.values(room.players);
+    // Oda tam dolma şartı aynen korunmuştur:
     if (playersArray.length === room.maxPlayers && playersArray.every(p => p.isReady)) {
         room.gameState.isRunning = true;
         io.to(roomCode).emit('game_started_mode');
