@@ -8,7 +8,7 @@ const io = new Server(server, {
     cors: { origin: "*" }
 });
 
-// Şarkı Sözü Havuzu (Server tarafında tutulur)
+// Şarkı Sözü Havuzu
 const internetSongPool = [
     { title: "Mavi", artist: "Barış Akarsu", lyrics: ["mavi mavi gözlerimde hep sitem mi var", "yoksa insan sevdiğine böyle mi bakar", "gözlerinde aşkın ateşi sönüyor", "kalbim durmuş sanki sana dönüyor"] },
     { title: "Şımarık", artist: "Tarkan", lyrics: ["yılani deliginden cikaran kaderim", "puskullu belam yakalarsam", "muck muck öp beni boynumdan", "kollarında çürüyeyim yanıyorum"] },
@@ -27,8 +27,8 @@ const internetSongPool = [
 let rooms = {
     "TRK6818": {
         maxPlayers: 4,
-        players: {},
-        gameState: { currentRound: 1, maxRounds: 12, isRunning: false }
+        players: {}, // { socketId: { name, seatIndex, isReady, score, micActive } }
+        gameState: { currentRound: 0, maxRounds: 12, isRunning: false, activeCatcher: null }
     }
 };
 
@@ -37,64 +37,161 @@ io.on('connection', (socket) => {
 
     // Odaya Katılma
     socket.on('join_room', (data) => {
-        const { roomCode, playerName, seatIndex } = data;
+        const { roomCode, playerName } = data;
         socket.join(roomCode);
         
         if (!rooms[roomCode]) {
-            rooms[roomCode] = { maxPlayers: 4, players: {}, gameState: { currentRound: 1, maxRounds: 12, isRunning: false } };
+            rooms[roomCode] = { 
+                maxPlayers: 4, 
+                players: {}, 
+                gameState: { currentRound: 0, maxRounds: 12, isRunning: false, activeCatcher: null } 
+            };
         }
 
-        rooms[roomCode].players[seatIndex] = { id: socket.id, name: playerName };
-        io.to(roomCode).emit('room_state', rooms[roomCode]);
+        // Boş bir koltuk indeksi bul (0'dan maxPlayers'a kadar)
+        let assignedSeat = -1;
+        for (let i = 0; i < rooms[roomCode].maxPlayers; i++) {
+            let seatOccupied = Object.values(rooms[roomCode].players).some(p => p.seatIndex === i);
+            if (!seatOccupied) {
+                assignedSeat = i;
+                break;
+            }
+        }
+
+        if (assignedSeat === -1) {
+            socket.emit('room_full');
+            return;
+        }
+
+        // Oyuncuyu kaydet
+        rooms[roomCode].players[socket.id] = {
+            id: socket.id,
+            name: playerName,
+            seatIndex: assignedSeat,
+            isReady: false,
+            score: 0,
+            micActive: true // Lobi aşamasında mikrofonlar açık (sohbet modu)
+        };
+
+        io.to(roomCode).emit('room_state', formatRoomData(rooms[roomCode]));
     });
 
-    // Oyuncu Sayısı Değiştirme (2, 4, 6)
+    // Oyuncu Hazır Durumu Değiştirme
+    socket.on('player_ready', (data) => {
+        const { roomCode, isReady } = data;
+        if (rooms[roomCode] && rooms[roomCode].players[socket.id]) {
+            rooms[roomCode].players[socket.id].isReady = isReady;
+            io.to(roomCode).emit('room_state', formatRoomData(rooms[roomCode]));
+
+            // Herkes hazır mı kontrol et ve oyun başlatılabilir mi bak
+            checkAndStartGame(roomCode);
+        }
+    });
+
+    // Oyuncu Sayısı Değiştirme
     socket.on('set_max_players', (data) => {
         const { roomCode, maxPlayers } = data;
         if (rooms[roomCode]) {
-            rooms[roomCode].maxPlayers = maxPlayers;
-            io.to(roomCode).emit('max_players_updated', { maxPlayers });
-            io.to(roomCode).emit('room_state', rooms[roomCode]);
+            rooms[roomCode].maxPlayers = parseInt(maxPlayers);
+            io.to(roomCode).emit('room_state', formatRoomData(rooms[roomCode]));
         }
     });
 
-    // Oyunu Manuel Başlat
-    socket.on('start_game_manual', (data) => {
-        const { roomCode } = data;
-        if (rooms[roomCode]) {
-            rooms[roomCode].gameState.isRunning = true;
-            rooms[roomCode].gameState.currentRound = 1;
-            io.to(roomCode).emit('game_starting');
-            
-            // İlk şarkıyı gönder
-            sendRandomSong(roomCode);
-        }
-    });
-
-    // Şarkıyı Yakala Butonu
+    // Şarkıyı Yakala Butonu (Hız Butonu)
     socket.on('catch_mic', (data) => {
-        const { roomCode, seatIndex } = data;
-        io.to(roomCode).emit('player_caught', { seatIndex });
-    });
-
-    // Odadan Çıkma / Ayrılma
-    socket.on('leave_room', (data) => {
-        const { roomCode, seatIndex } = data;
-        if (rooms[roomCode] && rooms[roomCode].players[seatIndex]) {
-            delete rooms[roomCode].players[seatIndex];
-            io.to(roomCode).emit('player_left', { seatIndex });
+        const { roomCode } = data;
+        let room = rooms[roomCode];
+        
+        // Eğer oyun başladıysa ve henüz kimse butona basmadıysa
+        if (room && room.gameState.isRunning && room.gameState.activeCatcher === null) {
+            room.gameState.activeCatcher = socket.id;
+            let player = room.players[socket.id];
+            
+            if (player) {
+                player.score += 10; // Doğru bilen puansal artış
+                io.to(roomCode).emit('player_caught_mic', { 
+                    playerName: player.name, 
+                    seatIndex: player.seatIndex 
+                });
+            }
         }
-        socket.leave(roomCode);
     });
 
+    // Bağlantı Koptuğunda veya Çıkıldığında
     socket.on('disconnect', () => {
+        for (let roomCode in rooms) {
+            if (rooms[roomCode].players[socket.id]) {
+                delete rooms[roomCode].players[socket.id];
+                io.to(roomCode).emit('room_state', formatRoomData(rooms[roomCode]));
+            }
+        }
         console.log(`Kullanıcı ayrıldı: ${socket.id}`);
     });
 });
 
-function sendRandomSong(roomCode) {
-    const randomSong = internetSongPool[Math.floor(Math.random() * internetSongPool.length)];
-    io.to(roomCode).emit('new_song', randomSong);
+// Oyuncuların listesini dizi (array) formatına çevirip frontend'e gönderen yardımcı fonksiyon
+function formatRoomData(room) {
+    let playerList = [];
+    for (let id in room.players) {
+        playerList.push(room.players[id]);
+    }
+    return {
+        maxPlayers: room.maxPlayers,
+        players: playerList,
+        gameState: room.gameState
+    };
+}
+
+// Tüm oyuncular hazır olduğunda otomatik oyunu başlatır
+function checkAndStartGame(roomCode) {
+    let room = rooms[roomCode];
+    if (!room || room.gameState.isRunning) return;
+
+    let playersArray = Object.values(room.players);
+    if (playersArray.length > 0 && playersArray.every(p => p.isReady)) {
+        room.gameState.isRunning = true;
+        io.to(roomCode).emit('game_started_mode');
+        
+        // 12 turluk döngüyü başlat
+        startNextRound(roomCode);
+    }
+}
+
+// Turları sırayla yöneten ana döngü
+function startNextRound(roomCode) {
+    let room = rooms[roomCode];
+    if (!room) return;
+
+    room.gameState.currentRound++;
+    room.gameState.activeCatcher = null;
+
+    if (room.gameState.currentRound > room.gameState.maxRounds) {
+        // OYUN BİTTİ - En yüksek puanlıyı bul
+        let players = Object.values(room.players);
+        let winner = players.reduce((prev, current) => (prev.score > current.score) ? prev : current, players[0]);
+        
+        io.to(roomCode).emit('game_over', winner || { name: "Kimse" });
+        room.gameState.isRunning = false;
+        return;
+    }
+
+    // Yeni tur sinyali gönder (5 saniye hazırlık)
+    io.to(roomCode).emit('new_round', { round: room.gameState.currentRound });
+
+    // 5 saniye sonra şarkı sözlerini ekrana fırlat
+    setTimeout(() => {
+        if (!rooms[roomCode]) return;
+        const randomSong = internetSongPool[Math.floor(Math.random() * internetSongPool.length)];
+        io.to(roomCode).emit('show_lyrics', randomSong);
+
+        // Oyuncuya şarkı söylemesi için 10 saniye ver, sonra sonraki tura geç
+        setTimeout(() => {
+            if (rooms[roomCode]) {
+                startNextRound(roomCode);
+            }
+        }, 10000); // 10 saniye şarkı söyleme süresi
+
+    }, 5000); // 5 saniye bekleme süresi
 }
 
 const PORT = process.env.PORT || 3000;
