@@ -1,6 +1,7 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
+const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
@@ -8,6 +9,9 @@ const io = new Server(server, {
     cors: { origin: "*" },
     maxHttpBufferSize: 1e8 
 });
+
+// Beyaz ekran sorununu çözen komut (HTML dosyasını dışarıya açar)
+app.use(express.static(path.join(__dirname)));
 
 const internetSongPool = [
     { title: "Mavi", artist: "Barış Akarsu", lyrics: ["mavi mavi gözlerimde hep sitem mi var", "yoksa insan sevdiğine böyle mi bakar", "gözlerinde aşkın ateşi sönüyor", "kalbim durmuş sanki sana dönüyor"] },
@@ -137,7 +141,6 @@ function checkAndStartGame(roomCode) {
     if (!room || room.gameState.isRunning) return;
 
     let playersArray = Object.values(room.players);
-    // Oda tam dolma şartı aynen korunmuştur:
     if (playersArray.length === room.maxPlayers && playersArray.every(p => p.isReady)) {
         room.gameState.isRunning = true;
         io.to(roomCode).emit('game_started_mode');
