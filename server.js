@@ -8,7 +8,6 @@ const io = new Server(server, {
     cors: { origin: "*" }
 });
 
-// Şarkı Sözü Havuzu
 const internetSongPool = [
     { title: "Mavi", artist: "Barış Akarsu", lyrics: ["mavi mavi gözlerimde hep sitem mi var", "yoksa insan sevdiğine böyle mi bakar", "gözlerinde aşkın ateşi sönüyor", "kalbim durmuş sanki sana dönüyor"] },
     { title: "Şımarık", artist: "Tarkan", lyrics: ["yılani deliginden cikaran kaderim", "puskullu belam yakalarsam", "muck muck öp beni boynumdan", "kollarında çürüyeyim yanıyorum"] },
@@ -24,91 +23,83 @@ const internetSongPool = [
     { title: "Sarı Çiçek", artist: "Barış Manço", lyrics: ["söyle sarı çiçek sarı çiçek", "cennetin yolu nirededir", "ağam bizim eldedir", "bizim ilktedir"] }
 ];
 
-let rooms = {
-    "TRK6818": {
-        maxPlayers: 4,
-        players: {}, // { socketId: { name, seatIndex, isReady, score, micActive } }
-        gameState: { currentRound: 0, maxRounds: 12, isRunning: false, activeCatcher: null }
-    }
-};
+let rooms = {}; // { roomCode: { maxPlayers: 2, players: {}, gameState: {...} } }
 
 io.on('connection', (socket) => {
     console.log(`Bir kullanıcı bağlandı: ${socket.id}`);
 
-    // Odaya Katılma
-    socket.on('join_room', (data) => {
-        const { roomCode, playerName } = data;
-        socket.join(roomCode);
-        
-        if (!rooms[roomCode]) {
-            rooms[roomCode] = { 
-                maxPlayers: 4, 
-                players: {}, 
-                gameState: { currentRound: 0, maxRounds: 12, isRunning: false, activeCatcher: null } 
+    // Oyuncu oda kapasitesi seçip katıldığında
+    socket.on('join_matchmaking', (data) => {
+        const { playerName, desiredMaxPlayers } = data;
+        const maxP = parseInt(desiredMaxPlayers);
+
+        // Uygun ve henüz dolmamış, oyunu başlamamış bir oda ara
+        let targetRoomCode = null;
+        for (let code in rooms) {
+            let room = rooms[code];
+            let currentPlayerCount = Object.keys(room.players).length;
+            if (room.maxPlayers === maxP && !room.gameState.isRunning && currentPlayerCount < maxP) {
+                targetRoomCode = code;
+                break;
+            }
+        }
+
+        // Eğer uygun oda yoksa, yeni oda aç
+        if (!targetRoomCode) {
+            targetRoomCode = 'ODA-' + Math.floor(1000 + Math.random() * 9000);
+            rooms[targetRoomCode] = {
+                maxPlayers: maxP,
+                players: {},
+                gameState: { currentRound: 0, maxRounds: 12, isRunning: false, activeCatcher: null }
             };
         }
 
-        // Boş bir koltuk indeksi bul (0'dan maxPlayers'a kadar)
+        socket.join(targetRoomCode);
+
+        // Koltuk indeksi ata
+        let room = rooms[targetRoomCode];
         let assignedSeat = -1;
-        for (let i = 0; i < rooms[roomCode].maxPlayers; i++) {
-            let seatOccupied = Object.values(rooms[roomCode].players).some(p => p.seatIndex === i);
-            if (!seatOccupied) {
+        for (let i = 0; i < maxP; i++) {
+            let seatTaken = Object.values(room.players).some(p => p.seatIndex === i);
+            if (!seatTaken) {
                 assignedSeat = i;
                 break;
             }
         }
 
-        if (assignedSeat === -1) {
-            socket.emit('room_full');
-            return;
-        }
-
-        // Oyuncuyu kaydet
-        rooms[roomCode].players[socket.id] = {
+        room.players[socket.id] = {
             id: socket.id,
             name: playerName,
             seatIndex: assignedSeat,
             isReady: false,
             score: 0,
-            micActive: true // Lobi aşamasında mikrofonlar açık (sohbet modu)
+            micActive: true
         };
 
-        io.to(roomCode).emit('room_state', formatRoomData(rooms[roomCode]));
+        // Oyuncuya hangi odaya girdiğini ve oda kodunu bildir
+        socket.emit('joined_room_success', { roomCode: targetRoomCode });
+        io.to(targetRoomCode).emit('room_state', formatRoomData(room));
     });
 
-    // Oyuncu Hazır Durumu Değiştirme
+    // Oyuncu Hazır Durumu
     socket.on('player_ready', (data) => {
         const { roomCode, isReady } = data;
         if (rooms[roomCode] && rooms[roomCode].players[socket.id]) {
             rooms[roomCode].players[socket.id].isReady = isReady;
             io.to(roomCode).emit('room_state', formatRoomData(rooms[roomCode]));
-
-            // Herkes hazır mı kontrol et ve oyun başlatılabilir mi bak
             checkAndStartGame(roomCode);
         }
     });
 
-    // Oyuncu Sayısı Değiştirme
-    socket.on('set_max_players', (data) => {
-        const { roomCode, maxPlayers } = data;
-        if (rooms[roomCode]) {
-            rooms[roomCode].maxPlayers = parseInt(maxPlayers);
-            io.to(roomCode).emit('room_state', formatRoomData(rooms[roomCode]));
-        }
-    });
-
-    // Şarkıyı Yakala Butonu (Hız Butonu)
+    // Şarkıyı Yakala
     socket.on('catch_mic', (data) => {
         const { roomCode } = data;
         let room = rooms[roomCode];
-        
-        // Eğer oyun başladıysa ve henüz kimse butona basmadıysa
         if (room && room.gameState.isRunning && room.gameState.activeCatcher === null) {
             room.gameState.activeCatcher = socket.id;
             let player = room.players[socket.id];
-            
             if (player) {
-                player.score += 10; // Doğru bilen puansal artış
+                player.score += 10;
                 io.to(roomCode).emit('player_caught_mic', { 
                     playerName: player.name, 
                     seatIndex: player.seatIndex 
@@ -117,19 +108,22 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Bağlantı Koptuğunda veya Çıkıldığında
     socket.on('disconnect', () => {
         for (let roomCode in rooms) {
             if (rooms[roomCode].players[socket.id]) {
                 delete rooms[roomCode].players[socket.id];
                 io.to(roomCode).emit('room_state', formatRoomData(rooms[roomCode]));
+                
+                // Oda tamamen boşaldıysa bellekten temizle
+                if (Object.keys(rooms[roomCode].players).length === 0) {
+                    delete rooms[roomCode];
+                }
             }
         }
         console.log(`Kullanıcı ayrıldı: ${socket.id}`);
     });
 });
 
-// Oyuncuların listesini dizi (array) formatına çevirip frontend'e gönderen yardımcı fonksiyon
 function formatRoomData(room) {
     let playerList = [];
     for (let id in room.players) {
@@ -142,22 +136,19 @@ function formatRoomData(room) {
     };
 }
 
-// Tüm oyuncular hazır olduğunda otomatik oyunu başlatır
 function checkAndStartGame(roomCode) {
     let room = rooms[roomCode];
     if (!room || room.gameState.isRunning) return;
 
     let playersArray = Object.values(room.players);
-    if (playersArray.length > 0 && playersArray.every(p => p.isReady)) {
+    // Oda tam dolduysa VE herkes hazırsa oyunu başlat
+    if (playersArray.length === room.maxPlayers && playersArray.every(p => p.isReady)) {
         room.gameState.isRunning = true;
         io.to(roomCode).emit('game_started_mode');
-        
-        // 12 turluk döngüyü başlat
         startNextRound(roomCode);
     }
 }
 
-// Turları sırayla yöneten ana döngü
 function startNextRound(roomCode) {
     let room = rooms[roomCode];
     if (!room) return;
@@ -166,32 +157,27 @@ function startNextRound(roomCode) {
     room.gameState.activeCatcher = null;
 
     if (room.gameState.currentRound > room.gameState.maxRounds) {
-        // OYUN BİTTİ - En yüksek puanlıyı bul
         let players = Object.values(room.players);
         let winner = players.reduce((prev, current) => (prev.score > current.score) ? prev : current, players[0]);
-        
         io.to(roomCode).emit('game_over', winner || { name: "Kimse" });
         room.gameState.isRunning = false;
         return;
     }
 
-    // Yeni tur sinyali gönder (5 saniye hazırlık)
     io.to(roomCode).emit('new_round', { round: room.gameState.currentRound });
 
-    // 5 saniye sonra şarkı sözlerini ekrana fırlat
     setTimeout(() => {
         if (!rooms[roomCode]) return;
         const randomSong = internetSongPool[Math.floor(Math.random() * internetSongPool.length)];
         io.to(roomCode).emit('show_lyrics', randomSong);
 
-        // Oyuncuya şarkı söylemesi için 10 saniye ver, sonra sonraki tura geç
         setTimeout(() => {
             if (rooms[roomCode]) {
                 startNextRound(roomCode);
             }
         }, 10000); // 10 saniye şarkı söyleme süresi
 
-    }, 5000); // 5 saniye bekleme süresi
+    }, 5000); // 5 saniye bekleme
 }
 
 const PORT = process.env.PORT || 3000;
